@@ -1,0 +1,26 @@
+# Environment & secrets
+.env
+credentials/
+whatsapp/auth/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Node
+whatsapp/node_modules/
+whatsapp/package-lock.json
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
