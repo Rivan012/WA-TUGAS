@@ -34,7 +34,7 @@ def _parse_deadline(raw_deadline):
 OVERDUE_GRACE_MINUTES = 15
 
 
-def _stage_to_send(menit_tersisa, task):
+def _stage_to_send(menit_tersisa, task, only_fields=None):
     """
     Tentukan stage mana (kalau ada) yang harus dikirim sekarang.
     Tiap stage punya window sendiri: aktif dari threshold-nya sampai
@@ -42,8 +42,14 @@ def _stage_to_send(menit_tersisa, task):
     Stage terakhir (paling dekat deadline) punya toleransi OVERDUE_GRACE_MINUTES
     setelah deadline lewat, bukan tanpa batas -- supaya task yang dari awal
     dibuat dengan deadline sudah lewat tidak ikut ke-trigger.
+
+    only_fields: kalau diisi, stage yang field-nya tidak ada di list ini dilewati
+    (dianggap "belum masuk giliran job ini"), tetap dicek job lain yang jadwalnya cocok.
     """
     for i, stage in enumerate(STAGES):
+        if only_fields is not None and stage["field"] not in only_fields:
+            continue  # bukan jatah job ini
+
         if task.get(stage["field"], False):
             continue  # stage ini sudah pernah dikirim
 
@@ -66,7 +72,7 @@ def _stage_to_send(menit_tersisa, task):
     return None
 
 
-def _process_task(doc):
+def _process_task(doc, only_fields=None):
     task = doc.to_dict()
     nama = task.get("nama", "(tanpa nama)")
     user_id = task.get("user_id")
@@ -84,7 +90,7 @@ def _process_task(doc):
     now = datetime.now(deadline.tzinfo) if deadline.tzinfo else datetime.now()
     menit_tersisa = (deadline - now).total_seconds() / 60
 
-    stage = _stage_to_send(menit_tersisa, task)
+    stage = _stage_to_send(menit_tersisa, task, only_fields=only_fields)
     if stage is None:
         return
 
@@ -111,8 +117,16 @@ def _process_task(doc):
         )
 
 
-def check_deadlines():
-    logger.info("Mengecek deadline...")
+def check_deadlines(only_fields=None):
+    """
+    Cek semua task 'belum' dan kirim reminder yang jatuh tempo.
+
+    only_fields: opsional, list nama field stage (mis. ["reminder_h3", "reminder_h1"])
+    buat membatasi job ini cuma memproses stage tertentu. None = semua stage.
+    Dipakai supaya H-3/H-1 bisa dijadwalkan di jam-jam tetap (lihat scheduler.py),
+    sementara H-1 Jam tetap dicek berkala biar presisi ke deadline.
+    """
+    logger.info("Mengecek deadline... (only_fields=%s)", only_fields)
 
     try:
         docs = list(
@@ -124,7 +138,7 @@ def check_deadlines():
 
     for doc in docs:
         try:
-            _process_task(doc)
+            _process_task(doc, only_fields=only_fields)
         except Exception:
             logger.exception("Error tak terduga memproses task %s", doc.id)
 
