@@ -101,8 +101,17 @@ async function startBot() {
 
         if (isGroup) {
             const mentioned = extText?.contextInfo?.mentionedJid || [];
+
+            // Bot bisa di-tag pakai dua identitas berbeda: nomor telepon biasa
+            // (@s.whatsapp.net) ATAU LID (@lid) — WhatsApp sekarang lebih sering
+            // pakai LID untuk mention, jadi harus dicocokkan ke keduanya.
             const botNumber = jidNumber(sock.user?.id);
-            isMentioned = mentioned.some((j) => jidNumber(j) === botNumber);
+            const botLid = jidNumber(sock.user?.lid);
+
+            isMentioned = mentioned.some((j) => {
+                const n = jidNumber(j);
+                return n === botNumber || n === botLid;
+            });
             text = stripMentions(rawText);
 
             groupName = await getGroupName(sock, from);
@@ -177,7 +186,7 @@ async function startBot() {
 
             await sock.sendMessage(jid, { text: message });
 
-            console.log("BERHASIL");
+            console.log("BERHASIL");``
             res.json({ success: true });
 
         } catch (e) {
