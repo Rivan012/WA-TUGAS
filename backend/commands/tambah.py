@@ -17,7 +17,7 @@ def _is_format_manual(body: str) -> bool:
     )
  
  
-def execute(user_id, message):
+def execute(user_id, message, group_id=None, group_name=None):
  
     body = message.replace("/tambah", "").strip()
  
@@ -61,7 +61,7 @@ def execute(user_id, message):
     if "catatan" not in task:
         task["catatan"] = ""
  
-    hasil = tambah_task(user_id, task)
+    hasil = tambah_task(user_id, task, group_id, group_name)
 
     return f"""✅ Tugas berhasil ditambahkan\nId Task : {hasil['task_id']}\nNama Tugas : {hasil['nama']}\nMata Kuliah: {hasil['matkul']}\nDeadline   : {hasil['deadline']}
             """

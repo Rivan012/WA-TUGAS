@@ -57,12 +57,15 @@ def webhook(data: IncomingMessage):
             return {"reply": None}
 
     user_id = data.from_number
+    # group_id cuma diisi kalau pesan datang dari grup -> dipakai buat scoping
+    # /tambah & /list supaya jadi daftar tugas bersama grup, bukan punya pribadi.
+    group_id = data.group_id if data.is_group else None
 
     if text.startswith("/tambah"):
-        reply = tambah.execute(user_id, text)
+        reply = tambah.execute(user_id, text, group_id, data.group_name if data.is_group else None)
 
     elif text.startswith("/list"):
-        reply = list.execute(user_id)
+        reply = list.execute(user_id, group_id)
 
     elif text.startswith("/selesai"):
         reply = selesai.execute(text)

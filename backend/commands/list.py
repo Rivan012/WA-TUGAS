@@ -1,14 +1,14 @@
 from backend.services.task import list_task
 
 
-def execute(user_id):
+def execute(user_id, group_id=None):
 
-    tasks = list_task(user_id)
+    tasks = list_task(user_id, group_id)
 
     if not tasks:
         return "📭 Tidak ada tugas."
 
-    pesan = "📚 *Daftar Tugas*\n\n"
+    pesan = "📚 *Daftar Tugas Grup*\n\n" if group_id else "📚 *Daftar Tugas*\n\n"
 
     for task in tasks:
 
