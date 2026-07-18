@@ -49,7 +49,9 @@ def webhook(data: IncomingMessage):
             # Anggota grup tidak nge-tag bot -> bot diam saja
             return {"reply": None}
 
-        if not is_member_allowed(data.from_number):
+        # /list dibuka untuk semua anggota grup (asal grup aktif & di-tag).
+        # Perintah lain (/tambah, /selesai, /hapus) tetap wajib whitelist.
+        if not text.startswith("/list") and not is_member_allowed(data.from_number):
             # Anggota belum diizinkan admin (lihat dashboard > Anggota Diizinkan) -> bot diam saja
             logger.info("Sender %s belum diizinkan, diabaikan.", data.from_number)
             return {"reply": None}

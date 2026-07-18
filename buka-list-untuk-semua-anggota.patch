@@ -1,0 +1,46 @@
+From 7136622d7f6a900f7803def4c758ca34e964aaf7 Mon Sep 17 00:00:00 2001
+From: Rivan <rivan@example.com>
+Date: Sat, 18 Jul 2026 01:52:44 +0000
+Subject: [PATCH] Buka /list untuk semua anggota grup aktif, command lain tetap
+ whitelist
+
+- /list bisa dipakai siapa saja di grup aktif yang nge-tag bot, tanpa perlu
+  terdaftar di whitelist anggota (masing-masing tetap cuma lihat tugasnya sendiri)
+- /tambah, /selesai, /hapus tetap wajib nomor terdaftar+aktif di whitelist
+- Update catatan di /help
+---
+ backend/commands/help.py  | 3 ++-
+ backend/routes/webhook.py | 4 +++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/backend/commands/help.py b/backend/commands/help.py
+index 6e91bec..920b5ea 100644
+--- a/backend/commands/help.py
++++ b/backend/commands/help.py
+@@ -9,5 +9,6 @@ def execute():
+ 
+ ℹ️ Di grup, tag/mention bot di awal pesan setiap kali mengirim perintah.
+ Contoh: @BotName /list
+-Hanya nomor yang terdaftar aktif di dashboard yang perintahnya dibalas.
++/list terbuka untuk semua anggota grup aktif.
++/tambah, /selesai, /hapus hanya untuk nomor yang di-whitelist admin.
+ """
+\ No newline at end of file
+diff --git a/backend/routes/webhook.py b/backend/routes/webhook.py
+index bccbbd9..48d53d5 100644
+--- a/backend/routes/webhook.py
++++ b/backend/routes/webhook.py
+@@ -49,7 +49,9 @@ def webhook(data: IncomingMessage):
+             # Anggota grup tidak nge-tag bot -> bot diam saja
+             return {"reply": None}
+ 
+-        if not is_member_allowed(data.from_number):
++        # /list dibuka untuk semua anggota grup (asal grup aktif & di-tag).
++        # Perintah lain (/tambah, /selesai, /hapus) tetap wajib whitelist.
++        if not text.startswith("/list") and not is_member_allowed(data.from_number):
+             # Anggota belum diizinkan admin (lihat dashboard > Anggota Diizinkan) -> bot diam saja
+             logger.info("Sender %s belum diizinkan, diabaikan.", data.from_number)
+             return {"reply": None}
+-- 
+2.43.0
+
