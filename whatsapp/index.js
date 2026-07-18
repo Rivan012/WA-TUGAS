@@ -1,4 +1,5 @@
 const axios = require("axios");
+const path = require("path");
 const {
     default: makeWASocket,
     useMultiFileAuthState,
@@ -46,7 +47,9 @@ function stripMentions(text) {
 }
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState("./auth");
+    const { state, saveCreds } = await useMultiFileAuthState(
+        path.join(__dirname, "auth")
+    );
 
     const sock = makeWASocket({
         auth: state

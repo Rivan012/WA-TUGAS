@@ -12,6 +12,7 @@ from backend.commands import (
     help
 )
 from backend.services.group_service import is_group_allowed, note_group_seen
+from backend.services.member_service import is_member_allowed
 
 router = APIRouter()
 logger = logging.getLogger("webhook")
@@ -46,6 +47,11 @@ def webhook(data: IncomingMessage):
 
         if not data.is_mentioned:
             # Anggota grup tidak nge-tag bot -> bot diam saja
+            return {"reply": None}
+
+        if not is_member_allowed(data.from_number):
+            # Anggota belum diizinkan admin (lihat dashboard > Anggota Diizinkan) -> bot diam saja
+            logger.info("Sender %s belum diizinkan, diabaikan.", data.from_number)
             return {"reply": None}
 
     user_id = data.from_number

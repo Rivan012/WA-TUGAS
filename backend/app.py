@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.routes.webhook import router as webhook_router
 from backend.routes.auth import router as auth_router
 from backend.routes.groups import router as groups_router
+from backend.routes.members import router as members_router
 from backend.scheduler import start_scheduler
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,6 +28,7 @@ app = FastAPI(
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(groups_router)
+app.include_router(members_router)
 
 # Dashboard web (login + kelola grup terdaftar) - static, dilayani dari /dashboard
 if FRONTEND_DIR.exists():

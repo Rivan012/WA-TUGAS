@@ -1,0 +1,55 @@
+From af09cbc4b8144a4ebedc4d8121bf67e00f21de54 Mon Sep 17 00:00:00 2001
+From: Rivan <rivan@example.com>
+Date: Sat, 18 Jul 2026 01:37:08 +0000
+Subject: [PATCH 1/2] Security: cegah folder auth/ ke-commit dari root, path
+ absolut
+
+- useMultiFileAuthState pakai path.join(__dirname, 'auth') bukan './auth' lagi,
+  supaya sesi WA selalu tersimpan di whatsapp/auth/ apapun cwd saat node dijalankan
+- Tambah /auth/ di .gitignore sebagai lapisan pengaman tambahan
+
+PENTING: commit 722d05c sempat mem-push kredensial sesi WhatsApp (auth/creds.json
+dkk) ke histori repo ini. Menghapusnya di commit baru TIDAK cukup -- riwayat lama
+masih menyimpannya. Perlu git filter-repo + force-push, dan sesi WA yang bocor
+harus diputus & di-scan ulang dari HP.
+---
+ .gitignore        | 1 +
+ whatsapp/index.js | 5 ++++-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/.gitignore b/.gitignore
+index 8018872..0422b24 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,6 +2,7 @@
+ .env
+ credentials/
+ whatsapp/auth/
++/auth/
+ 
+ # Python
+ venv/
+diff --git a/whatsapp/index.js b/whatsapp/index.js
+index f9dd1f7..2a0896e 100644
+--- a/whatsapp/index.js
++++ b/whatsapp/index.js
+@@ -1,4 +1,5 @@
+ const axios = require("axios");
++const path = require("path");
+ const {
+     default: makeWASocket,
+     useMultiFileAuthState,
+@@ -46,7 +47,9 @@ function stripMentions(text) {
+ }
+ 
+ async function startBot() {
+-    const { state, saveCreds } = await useMultiFileAuthState("./auth");
++    const { state, saveCreds } = await useMultiFileAuthState(
++        path.join(__dirname, "auth")
++    );
+ 
+     const sock = makeWASocket({
+         auth: state
+-- 
+2.43.0
+

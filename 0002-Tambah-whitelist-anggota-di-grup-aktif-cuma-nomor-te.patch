@@ -1,0 +1,502 @@
+From eda2a59b833bbaa010a044ec9515438f72669b24 Mon Sep 17 00:00:00 2001
+From: Rivan <rivan@example.com>
+Date: Sat, 18 Jul 2026 01:28:37 +0000
+Subject: [PATCH 2/2] Tambah whitelist anggota: di grup aktif, cuma nomor
+ terdaftar+aktif yang perintahnya dibalas
+
+- Collection baru allowed_members (repo/service/routes)
+- webhook.py: cek is_member_allowed() setelah cek grup aktif & tag, berlaku utk semua command
+- Dashboard: section baru 'Anggota Diizinkan' (daftar manual by nomor WA, toggle aktif, hapus)
+- Nomor dinormalisasi (08xx -> 62xx) biar cocok sama JID WA
+- Chat pribadi tetap tidak terpengaruh whitelist ini
+- Update README
+---
+ README.md                                 |  33 +++++--
+ backend/app.py                            |   2 +
+ backend/commands/help.py                  |   1 +
+ backend/repositories/member_repository.py |  82 ++++++++++++++++
+ backend/routes/members.py                 |  48 ++++++++++
+ backend/routes/webhook.py                 |   6 ++
+ backend/services/member_service.py        |  30 ++++++
+ frontend/app.html                         | 110 ++++++++++++++++++++++
+ 8 files changed, 306 insertions(+), 6 deletions(-)
+ create mode 100644 backend/repositories/member_repository.py
+ create mode 100644 backend/routes/members.py
+ create mode 100644 backend/services/member_service.py
+
+diff --git a/README.md b/README.md
+index 3c16066..897ec02 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,8 @@ Bot WhatsApp untuk mencatat tugas kuliah, dengan reminder otomatis mendekati dea
+ - List, tandai selesai, dan hapus tugas
+ - Validasi deadline tidak boleh di masa lalu
+ - **Dukungan grup WhatsApp**: bot hanya membalas di grup yang didaftarkan lewat dashboard, dan hanya kalau anggota grup nge-*tag*/mention bot bersama perintahnya
+-- **Dashboard web** (login diperlukan) untuk mengaktifkan/menonaktifkan/menghapus grup terdaftar
++- **Whitelist anggota per nomor**: di grup yang aktif sekalipun, cuma nomor WA yang didaftarkan & diaktifkan admin di dashboard yang perintahnya (`/tambah`, `/list`, `/selesai`, `/hapus`) dibalas bot
++- **Dashboard web** (login diperlukan) untuk mengaktifkan/menonaktifkan/menghapus grup terdaftar, dan mengelola daftar anggota yang diizinkan
+ 
+ ## Arsitektur
+ 
+@@ -25,7 +26,8 @@ whatsapp/index.js  (Node.js + Baileys)
+      │  HTTP
+      ▼
+ backend/routes/webhook.py  (FastAPI)
+-  - Filter: grup harus terdaftar+aktif, dan pesan harus nge-tag bot
++  - Filter: grup harus terdaftar+aktif, pesan harus nge-tag bot,
++    dan pengirim harus ada di whitelist anggota (khusus di dalam grup)
+      │
+      ▼
+ backend/commands/*.py  (tambah, list, selesai, hapus, help)
+@@ -70,17 +72,20 @@ wa-tugas/
+ │  ├─ repositories/
+ │  │  ├─ task_repository.py    # akses Firestore untuk task
+ │  │  ├─ group_repository.py   # akses Firestore untuk grup terdaftar
++│  │  ├─ member_repository.py  # akses Firestore untuk whitelist anggota
+ │  │  └─ user_repository.py    # akses Firestore untuk akun dashboard
+ │  ├─ routes/
+ │  │  ├─ webhook.py            # endpoint yang dipanggil gateway WA + group-seen
+ │  │  ├─ auth.py                # login/logout dashboard
+-│  │  └─ groups.py              # CRUD grup terdaftar (butuh login)
++│  │  ├─ groups.py              # CRUD grup terdaftar (butuh login)
++│  │  └─ members.py             # CRUD whitelist anggota (butuh login)
+ │  ├─ scripts/
+ │  │  └─ create_admin.py       # CLI buat akun dashboard pertama kali
+ │  ├─ services/
+ │  │  ├─ ai_parser.py          # parsing bahasa bebas via Gemini
+ │  │  ├─ task.py                # business logic task
+ │  │  ├─ group_service.py       # business logic grup terdaftar
++│  │  ├─ member_service.py      # business logic whitelist anggota
+ │  │  ├─ auth_service.py        # hashing password & JWT session
+ │  │  └─ whatsapp_service.py   # kirim pesan ke gateway WA
+ │  └─ utils/
+@@ -187,8 +192,9 @@ Sama seperti biasa, tidak perlu tag:
+    @NamaBot /tambah tugas laporan fisika deadline besok jam 8 malam
+    @NamaBot /list
+    ```
+-   Pesan grup yang tidak nge-tag bot, atau dari grup yang belum diaktifkan, akan **diabaikan** (bot tidak membalas apa pun).
++   Pesan grup yang tidak nge-tag bot, dari grup yang belum diaktifkan, atau dari **nomor yang belum di-whitelist** (lihat langkah berikutnya), akan **diabaikan** (bot tidak membalas apa pun).
+ 5. Tugas yang ditambahkan dari grup tetap tercatat atas nama pengirim aslinya (bukan grupnya), jadi `/list` di grup hanya menampilkan tugas milik orang yang mengirim perintah.
++6. Selain grup, **setiap nomor WA juga harus di-whitelist** di dashboard bagian "Anggota Diizinkan" sebelum perintahnya dibalas — walaupun grupnya sudah aktif dan sudah nge-tag bot dengan benar. Admin masukkan nomor WA (boleh format `08xx` atau `62xx`) lewat dashboard, lalu aktifkan.
+ 
+ ## Reminder Otomatis
+ 
+@@ -223,8 +229,12 @@ Dashboard statis di `frontend/`, dilayani otomatis oleh backend di `/dashboard/`
+ | POST | `/api/groups` | Daftarkan/aktifkan grup manual (`{jid, name}`) |
+ | PATCH | `/api/groups/{jid}/active` | Aktifkan/nonaktifkan grup (`{active: bool}`) |
+ | DELETE | `/api/groups/{jid}` | Hapus grup dari daftar |
++| GET | `/api/members` | Daftar semua anggota whitelist |
++| POST | `/api/members` | Daftarkan/aktifkan anggota manual (`{phone, name}`) |
++| PATCH | `/api/members/{phone}/active` | Aktifkan/nonaktifkan anggota (`{active: bool}`) |
++| DELETE | `/api/members/{phone}` | Hapus anggota dari whitelist |
+ 
+-Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/login`).
++Semua endpoint `/api/groups/*` dan `/api/members/*` butuh cookie sesi (login dulu lewat `/api/auth/login`).
+ 
+ ## Skema Dokumen Firestore
+ 
+@@ -265,6 +275,17 @@ Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/lo
+ }
+ ```
+ 
++### Collection `allowed_members`
++```json
++{
++  "phone": "6281234567890",
++  "name": "Budi",
++  "active": true,
++  "registered_by": "rivan",
++  "created_at": "2026-07-17T09:30:00"
++}
++```
++
+ ## Troubleshooting
+ 
+ | Gejala | Kemungkinan Penyebab |
+@@ -274,7 +295,7 @@ Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/lo
+ | `Cannot destructure property 'user' of jidDecode(...)` | Sesi WhatsApp corrupt — hapus folder `whatsapp/auth` dan scan ulang QR |
+ | `/tambah` gagal parse pesan bebas | Cek `GOOGLE_AI_API_KEY` sudah benar dan model belum deprecated (cek [Gemini deprecations](https://ai.google.dev/gemini-api/docs/changelog)) |
+ | Field `nama` wajib diisi padahal sudah diisi | AI parser gagal (cek log `[tambah] AI parser gagal...`), fallback ke parser manual yang butuh format `key: value` |
+-| Bot diam saja di grup | Grup belum diaktifkan di dashboard, atau anggota lupa nge-tag/mention bot di pesannya |
++| Bot diam saja di grup | Grup belum diaktifkan di dashboard, anggota lupa nge-tag/mention bot, atau nomor pengirim belum di-whitelist di "Anggota Diizinkan" |
+ | Grup tidak muncul di dashboard | Belum ada pesan terkirim di grup itu sejak bot ditambahkan — kirim 1 pesan apa saja dulu, atau daftarkan manual pakai Group JID |
+ | `401 Unauthorized` saat akses dashboard | Sesi login sudah kedaluwarsa (`DASHBOARD_TOKEN_EXPIRE_HOURS`) — login ulang |
+ 
+diff --git a/backend/app.py b/backend/app.py
+index a98530e..fa9e726 100644
+--- a/backend/app.py
++++ b/backend/app.py
+@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
+ from backend.routes.webhook import router as webhook_router
+ from backend.routes.auth import router as auth_router
+ from backend.routes.groups import router as groups_router
++from backend.routes.members import router as members_router
+ from backend.scheduler import start_scheduler
+ 
+ BASE_DIR = Path(__file__).resolve().parent.parent
+@@ -27,6 +28,7 @@ app = FastAPI(
+ app.include_router(webhook_router)
+ app.include_router(auth_router)
+ app.include_router(groups_router)
++app.include_router(members_router)
+ 
+ # Dashboard web (login + kelola grup terdaftar) - static, dilayani dari /dashboard
+ if FRONTEND_DIR.exists():
+diff --git a/backend/commands/help.py b/backend/commands/help.py
+index b58e09d..6e91bec 100644
+--- a/backend/commands/help.py
++++ b/backend/commands/help.py
+@@ -9,4 +9,5 @@ def execute():
+ 
+ ℹ️ Di grup, tag/mention bot di awal pesan setiap kali mengirim perintah.
+ Contoh: @BotName /list
++Hanya nomor yang terdaftar aktif di dashboard yang perintahnya dibalas.
+ """
+\ No newline at end of file
+diff --git a/backend/repositories/member_repository.py b/backend/repositories/member_repository.py
+new file mode 100644
+index 0000000..f4d2890
+--- /dev/null
++++ b/backend/repositories/member_repository.py
+@@ -0,0 +1,82 @@
++from datetime import datetime
++from backend.firebase_service import db
++
++COLLECTION = "allowed_members"
++
++
++def normalize_phone(phone_or_jid: str) -> str:
++    """
++    Samain format nomor WA, baik yang diinput admin di dashboard (mis. '6281234567890'
++    atau '081234567890' atau '+6281234567890') maupun yang datang dari webhook
++    (JID lengkap 'from_number', mis. '6281234567890@s.whatsapp.net' atau ada device-id
++    '6281234567890:12@s.whatsapp.net'), supaya bisa dibandingkan apple-to-apple.
++    """
++    raw = phone_or_jid.split("@")[0].split(":")[0].strip().lstrip("+")
++    raw = "".join(ch for ch in raw if ch.isdigit())
++
++    # Nomor lokal yang diketik admin diawali '0' -> ganti ke kode negara 62 (Indonesia)
++    if raw.startswith("0"):
++        raw = "62" + raw[1:]
++
++    return raw
++
++
++def _doc(phone):
++    return db.collection(COLLECTION).document(normalize_phone(phone))
++
++
++def get_member(phone):
++    snap = _doc(phone).get()
++    return snap.to_dict() if snap.exists else None
++
++
++def is_member_active(phone) -> bool:
++    member = get_member(phone)
++    return bool(member and member.get("active"))
++
++
++def list_members():
++    docs = db.collection(COLLECTION).stream()
++    return [doc.to_dict() for doc in docs]
++
++
++def register_member(phone, name, registered_by):
++    normalized = normalize_phone(phone)
++    if not normalized:
++        raise ValueError("Nomor WA tidak valid.")
++
++    ref = _doc(normalized)
++    snap = ref.get()
++
++    if snap.exists:
++        ref.update({
++            "name": name or snap.to_dict().get("name", normalized),
++            "active": True,
++            "registered_by": registered_by,
++        })
++    else:
++        ref.set({
++            "phone": normalized,
++            "name": name or normalized,
++            "active": True,
++            "registered_by": registered_by,
++            "created_at": datetime.now().isoformat(),
++        })
++
++    return _doc(normalized).get().to_dict()
++
++
++def set_active(phone, active: bool):
++    ref = _doc(phone)
++    if not ref.get().exists:
++        return None
++    ref.update({"active": active})
++    return ref.get().to_dict()
++
++
++def delete_member(phone):
++    ref = _doc(phone)
++    if not ref.get().exists:
++        return False
++    ref.delete()
++    return True
+diff --git a/backend/routes/members.py b/backend/routes/members.py
+new file mode 100644
+index 0000000..e37603e
+--- /dev/null
++++ b/backend/routes/members.py
+@@ -0,0 +1,48 @@
++from fastapi import APIRouter, Depends, HTTPException
++from pydantic import BaseModel
++
++from backend.services import member_service
++from backend.services.auth_service import get_current_user
++
++router = APIRouter(prefix="/api/members", tags=["members"])
++
++
++class RegisterMemberRequest(BaseModel):
++    phone: str
++    name: str = ""
++
++
++class SetActiveRequest(BaseModel):
++    active: bool
++
++
++@router.get("")
++def get_members(username: str = Depends(get_current_user)):
++    return {"members": member_service.list_members()}
++
++
++@router.post("")
++def register_member(data: RegisterMemberRequest, username: str = Depends(get_current_user)):
++    try:
++        member = member_service.register_member(data.phone, data.name, username)
++    except ValueError as e:
++        raise HTTPException(status_code=400, detail=str(e))
++    return {"success": True, "member": member}
++
++
++@router.patch("/{phone}/active")
++def set_member_active(phone: str, data: SetActiveRequest, username: str = Depends(get_current_user)):
++    try:
++        member = member_service.set_active(phone, data.active)
++    except ValueError as e:
++        raise HTTPException(status_code=404, detail=str(e))
++    return {"success": True, "member": member}
++
++
++@router.delete("/{phone}")
++def remove_member(phone: str, username: str = Depends(get_current_user)):
++    try:
++        member_service.delete_member(phone)
++    except ValueError as e:
++        raise HTTPException(status_code=404, detail=str(e))
++    return {"success": True}
+diff --git a/backend/routes/webhook.py b/backend/routes/webhook.py
+index b11086f..bccbbd9 100644
+--- a/backend/routes/webhook.py
++++ b/backend/routes/webhook.py
+@@ -12,6 +12,7 @@ from backend.commands import (
+     help
+ )
+ from backend.services.group_service import is_group_allowed, note_group_seen
++from backend.services.member_service import is_member_allowed
+ 
+ router = APIRouter()
+ logger = logging.getLogger("webhook")
+@@ -48,6 +49,11 @@ def webhook(data: IncomingMessage):
+             # Anggota grup tidak nge-tag bot -> bot diam saja
+             return {"reply": None}
+ 
++        if not is_member_allowed(data.from_number):
++            # Anggota belum diizinkan admin (lihat dashboard > Anggota Diizinkan) -> bot diam saja
++            logger.info("Sender %s belum diizinkan, diabaikan.", data.from_number)
++            return {"reply": None}
++
+     user_id = data.from_number
+ 
+     if text.startswith("/tambah"):
+diff --git a/backend/services/member_service.py b/backend/services/member_service.py
+new file mode 100644
+index 0000000..81f0b93
+--- /dev/null
++++ b/backend/services/member_service.py
+@@ -0,0 +1,30 @@
++from backend.repositories import member_repository as repo
++
++
++def list_members():
++    members = repo.list_members()
++    members.sort(key=lambda m: (not m.get("active"), m.get("name") or ""))
++    return members
++
++
++def register_member(phone: str, name: str, registered_by: str):
++    if not phone or not phone.strip():
++        raise ValueError("Nomor WA wajib diisi.")
++    return repo.register_member(phone.strip(), (name or "").strip(), registered_by)
++
++
++def set_active(phone: str, active: bool):
++    result = repo.set_active(phone, active)
++    if result is None:
++        raise ValueError("Anggota tidak ditemukan.")
++    return result
++
++
++def delete_member(phone: str):
++    if not repo.delete_member(phone):
++        raise ValueError("Anggota tidak ditemukan.")
++    return True
++
++
++def is_member_allowed(jid_or_phone: str) -> bool:
++    return repo.is_member_active(jid_or_phone)
+diff --git a/frontend/app.html b/frontend/app.html
+index 7e3064f..cbd9242 100644
+--- a/frontend/app.html
++++ b/frontend/app.html
+@@ -32,6 +32,10 @@
+       <div class="stat-num" id="stat-pending">–</div>
+       <div class="stat-label">Menunggu Aktivasi</div>
+     </div>
++    <div class="stat-card">
++      <div class="stat-num" id="stat-members">–</div>
++      <div class="stat-label">Anggota Diizinkan</div>
++    </div>
+   </div>
+ 
+   <div class="section-title">＋ Daftarkan Grup Manual</div>
+@@ -49,6 +53,20 @@
+   <div class="group-list" id="group-list">
+     <div class="empty-state">Memuat...</div>
+   </div>
++
++  <div class="section-title" style="margin-top:44px;">＋ Anggota Diizinkan</div>
++  <p class="section-desc">
++    Di grup yang sudah aktif, cuma nomor WA yang ada &amp; aktif di daftar ini yang perintahnya (<code>/tambah</code>, <code>/list</code>, <code>/selesai</code>, <code>/hapus</code>) akan dibalas bot — walau sudah nge-tag bot. Anggota lain di grup tetap diabaikan sampai didaftarkan di sini.
++  </p>
++  <form class="add-group-form" id="add-member-form">
++    <input type="text" name="phone" placeholder="Nomor WA, contoh: 081234567890" required>
++    <input type="text" name="name" placeholder="Nama (opsional)">
++    <button type="submit">Daftarkan</button>
++  </form>
++
++  <div class="group-list" id="member-list">
++    <div class="empty-state">Memuat...</div>
++  </div>
+ </div>
+ 
+ <script src="app.js"></script>
+@@ -160,6 +178,97 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
+   window.location.href = "index.html";
+ });
+ 
++let members = [];
++
++function renderMembers() {
++  const list = document.getElementById("member-list");
++
++  if (members.length === 0) {
++    list.innerHTML = `<div class="empty-state">Belum ada anggota. Daftarkan nomor WA di atas biar bisa pakai perintah bot di grup.</div>`;
++    return;
++  }
++
++  list.innerHTML = members.map(m => `
++    <div class="group-row" data-phone="${escapeHtml(m.phone)}">
++      <span class="status-dot ${m.active ? "active" : "pending"}"></span>
++      <div class="group-info">
++        <div class="group-name">${escapeHtml(m.name || m.phone)}</div>
++        <div class="group-jid">${escapeHtml(m.phone)}</div>
++      </div>
++      <div class="group-actions">
++        <div class="toggle ${m.active ? "on" : ""}" title="${m.active ? "Aktif — klik untuk nonaktifkan" : "Nonaktif — klik untuk aktifkan"}">
++          <div class="knob"></div>
++        </div>
++        <button class="btn-icon" title="Hapus anggota">Hapus</button>
++      </div>
++    </div>
++  `).join("");
++
++  list.querySelectorAll(".toggle").forEach((el, i) => {
++    el.addEventListener("click", () => toggleMember(members[i]));
++  });
++  list.querySelectorAll(".btn-icon").forEach((el, i) => {
++    el.addEventListener("click", () => deleteMember(members[i]));
++  });
++}
++
++async function loadMembers() {
++  const res = await apiFetch("/api/members");
++  if (res.status === 401) {
++    window.location.href = "index.html";
++    return;
++  }
++  const data = await res.json();
++  members = data.members || [];
++  renderMembers();
++  document.getElementById("stat-members").textContent = members.filter(m => m.active).length;
++}
++
++async function toggleMember(member) {
++  const res = await apiFetch(`/api/members/${encodeURIComponent(member.phone)}/active`, {
++    method: "PATCH",
++    body: JSON.stringify({ active: !member.active }),
++  });
++  if (res.ok) {
++    showToast(member.active ? "Anggota dinonaktifkan." : "Anggota diaktifkan.");
++    loadMembers();
++  } else {
++    showToast("Gagal mengubah status anggota.");
++  }
++}
++
++async function deleteMember(member) {
++  if (!confirm(`Hapus anggota "${member.name || member.phone}" dari daftar?`)) return;
++  const res = await apiFetch(`/api/members/${encodeURIComponent(member.phone)}`, { method: "DELETE" });
++  if (res.ok) {
++    showToast("Anggota dihapus.");
++    loadMembers();
++  } else {
++    showToast("Gagal menghapus anggota.");
++  }
++}
++
++document.getElementById("add-member-form").addEventListener("submit", async (e) => {
++  e.preventDefault();
++  const form = e.target;
++  const phone = form.phone.value.trim();
++  const name = form.name.value.trim();
++
++  const res = await apiFetch("/api/members", {
++    method: "POST",
++    body: JSON.stringify({ phone, name }),
++  });
++
++  if (res.ok) {
++    form.reset();
++    showToast("Anggota didaftarkan & diaktifkan.");
++    loadMembers();
++  } else {
++    const data = await res.json().catch(() => ({}));
++    showToast("❌ " + (data.detail || "Gagal mendaftarkan anggota."));
++  }
++});
++
+ (async () => {
+   const res = await apiFetch("/api/auth/me");
+   if (!res.ok) {
+@@ -169,6 +278,7 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
+   const data = await res.json();
+   document.getElementById("who").textContent = "👤 " + data.username;
+   loadGroups();
++  loadMembers();
+ })();
+ </script>
+ </body>
+-- 
+2.43.0
+

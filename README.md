@@ -9,7 +9,8 @@ Bot WhatsApp untuk mencatat tugas kuliah, dengan reminder otomatis mendekati dea
 - List, tandai selesai, dan hapus tugas
 - Validasi deadline tidak boleh di masa lalu
 - **Dukungan grup WhatsApp**: bot hanya membalas di grup yang didaftarkan lewat dashboard, dan hanya kalau anggota grup nge-*tag*/mention bot bersama perintahnya
-- **Dashboard web** (login diperlukan) untuk mengaktifkan/menonaktifkan/menghapus grup terdaftar
+- **Whitelist anggota per nomor**: di grup yang aktif sekalipun, cuma nomor WA yang didaftarkan & diaktifkan admin di dashboard yang perintahnya (`/tambah`, `/list`, `/selesai`, `/hapus`) dibalas bot
+- **Dashboard web** (login diperlukan) untuk mengaktifkan/menonaktifkan/menghapus grup terdaftar, dan mengelola daftar anggota yang diizinkan
 
 ## Arsitektur
 
@@ -25,7 +26,8 @@ whatsapp/index.js  (Node.js + Baileys)
      │  HTTP
      ▼
 backend/routes/webhook.py  (FastAPI)
-  - Filter: grup harus terdaftar+aktif, dan pesan harus nge-tag bot
+  - Filter: grup harus terdaftar+aktif, pesan harus nge-tag bot,
+    dan pengirim harus ada di whitelist anggota (khusus di dalam grup)
      │
      ▼
 backend/commands/*.py  (tambah, list, selesai, hapus, help)
@@ -70,17 +72,20 @@ wa-tugas/
 │  ├─ repositories/
 │  │  ├─ task_repository.py    # akses Firestore untuk task
 │  │  ├─ group_repository.py   # akses Firestore untuk grup terdaftar
+│  │  ├─ member_repository.py  # akses Firestore untuk whitelist anggota
 │  │  └─ user_repository.py    # akses Firestore untuk akun dashboard
 │  ├─ routes/
 │  │  ├─ webhook.py            # endpoint yang dipanggil gateway WA + group-seen
 │  │  ├─ auth.py                # login/logout dashboard
-│  │  └─ groups.py              # CRUD grup terdaftar (butuh login)
+│  │  ├─ groups.py              # CRUD grup terdaftar (butuh login)
+│  │  └─ members.py             # CRUD whitelist anggota (butuh login)
 │  ├─ scripts/
 │  │  └─ create_admin.py       # CLI buat akun dashboard pertama kali
 │  ├─ services/
 │  │  ├─ ai_parser.py          # parsing bahasa bebas via Gemini
 │  │  ├─ task.py                # business logic task
 │  │  ├─ group_service.py       # business logic grup terdaftar
+│  │  ├─ member_service.py      # business logic whitelist anggota
 │  │  ├─ auth_service.py        # hashing password & JWT session
 │  │  └─ whatsapp_service.py   # kirim pesan ke gateway WA
 │  └─ utils/
@@ -187,8 +192,9 @@ Sama seperti biasa, tidak perlu tag:
    @NamaBot /tambah tugas laporan fisika deadline besok jam 8 malam
    @NamaBot /list
    ```
-   Pesan grup yang tidak nge-tag bot, atau dari grup yang belum diaktifkan, akan **diabaikan** (bot tidak membalas apa pun).
+   Pesan grup yang tidak nge-tag bot, dari grup yang belum diaktifkan, atau dari **nomor yang belum di-whitelist** (lihat langkah berikutnya), akan **diabaikan** (bot tidak membalas apa pun).
 5. Tugas yang ditambahkan dari grup tetap tercatat atas nama pengirim aslinya (bukan grupnya), jadi `/list` di grup hanya menampilkan tugas milik orang yang mengirim perintah.
+6. Selain grup, **setiap nomor WA juga harus di-whitelist** di dashboard bagian "Anggota Diizinkan" sebelum perintahnya dibalas — walaupun grupnya sudah aktif dan sudah nge-tag bot dengan benar. Admin masukkan nomor WA (boleh format `08xx` atau `62xx`) lewat dashboard, lalu aktifkan.
 
 ## Reminder Otomatis
 
@@ -223,8 +229,12 @@ Dashboard statis di `frontend/`, dilayani otomatis oleh backend di `/dashboard/`
 | POST | `/api/groups` | Daftarkan/aktifkan grup manual (`{jid, name}`) |
 | PATCH | `/api/groups/{jid}/active` | Aktifkan/nonaktifkan grup (`{active: bool}`) |
 | DELETE | `/api/groups/{jid}` | Hapus grup dari daftar |
+| GET | `/api/members` | Daftar semua anggota whitelist |
+| POST | `/api/members` | Daftarkan/aktifkan anggota manual (`{phone, name}`) |
+| PATCH | `/api/members/{phone}/active` | Aktifkan/nonaktifkan anggota (`{active: bool}`) |
+| DELETE | `/api/members/{phone}` | Hapus anggota dari whitelist |
 
-Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/login`).
+Semua endpoint `/api/groups/*` dan `/api/members/*` butuh cookie sesi (login dulu lewat `/api/auth/login`).
 
 ## Skema Dokumen Firestore
 
@@ -265,6 +275,17 @@ Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/lo
 }
 ```
 
+### Collection `allowed_members`
+```json
+{
+  "phone": "6281234567890",
+  "name": "Budi",
+  "active": true,
+  "registered_by": "rivan",
+  "created_at": "2026-07-17T09:30:00"
+}
+```
+
 ## Troubleshooting
 
 | Gejala | Kemungkinan Penyebab |
@@ -274,7 +295,7 @@ Semua endpoint `/api/groups/*` butuh cookie sesi (login dulu lewat `/api/auth/lo
 | `Cannot destructure property 'user' of jidDecode(...)` | Sesi WhatsApp corrupt — hapus folder `whatsapp/auth` dan scan ulang QR |
 | `/tambah` gagal parse pesan bebas | Cek `GOOGLE_AI_API_KEY` sudah benar dan model belum deprecated (cek [Gemini deprecations](https://ai.google.dev/gemini-api/docs/changelog)) |
 | Field `nama` wajib diisi padahal sudah diisi | AI parser gagal (cek log `[tambah] AI parser gagal...`), fallback ke parser manual yang butuh format `key: value` |
-| Bot diam saja di grup | Grup belum diaktifkan di dashboard, atau anggota lupa nge-tag/mention bot di pesannya |
+| Bot diam saja di grup | Grup belum diaktifkan di dashboard, anggota lupa nge-tag/mention bot, atau nomor pengirim belum di-whitelist di "Anggota Diizinkan" |
 | Grup tidak muncul di dashboard | Belum ada pesan terkirim di grup itu sejak bot ditambahkan — kirim 1 pesan apa saja dulu, atau daftarkan manual pakai Group JID |
 | `401 Unauthorized` saat akses dashboard | Sesi login sudah kedaluwarsa (`DASHBOARD_TOKEN_EXPIRE_HOURS`) — login ulang |
 

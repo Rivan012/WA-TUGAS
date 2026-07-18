@@ -2,6 +2,7 @@
 .env
 credentials/
 whatsapp/auth/
+/auth/
 
 # Python
 venv/
