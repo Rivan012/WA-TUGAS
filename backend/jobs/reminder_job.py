@@ -76,10 +76,14 @@ def _process_task(doc, only_fields=None):
     task = doc.to_dict()
     nama = task.get("nama", "(tanpa nama)")
     user_id = task.get("user_id")
+    group_id = task.get("group_id")
+    # Tugas dari grup -> reminder harus balik ke grup itu, bukan ke nomor
+    # pribadi orang yang nambahin (dia cuma pencatat, tugasnya milik grup).
+    target = group_id or user_id
     raw_deadline = task.get("deadline")
 
-    if not user_id:
-        logger.warning("Task %s tidak punya user_id, skip.", doc.id)
+    if not target:
+        logger.warning("Task %s tidak punya user_id/group_id, skip.", doc.id)
         return
 
     deadline = _parse_deadline(raw_deadline)
@@ -100,7 +104,7 @@ def _process_task(doc, only_fields=None):
     )
 
     berhasil = send_message(
-        user_id,
+        target,
         f"""🚨 REMINDER TUGAS ({stage['label']})\nNama: {nama}\nDeadline: {deadline.strftime('%d-%m-%Y %H:%M')}\n\nSegera kerjakan!""",
     )
 
